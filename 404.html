@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Redirecting...</title>
+  <style>
+    body { background: #0b0f19; color: #fff; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; flex-direction: column; gap: 16px; }
+    .loader { border: 3px solid rgba(255,255,255,0.1); border-radius: 50%; border-top: 3px solid #818cf8; width: 30px; height: 30px; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    p { color: #64748b; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="loader"></div>
+  <p>Redirecting...</p>
+  <script>
+    async function redirect() {
+      // Extract slug from path
+      const slug = window.location.pathname.split('/').filter(Boolean).pop() || '';
+
+      if (!slug || slug.endsWith('.html') || slug.includes('.')) {
+        document.body.innerHTML = '<h2 style="font-family:sans-serif">Page not found.</h2>';
+        return;
+      }
+
+      // Detect owner from hostname
+      const owner = "Lineazk";
+      const repo = "Lineazk.github.io";
+
+      try {
+        let redirects = {};
+        let fetched = false;
+
+        // 1. Try to fetch from GitHub API first for real-time (0 cache delay) results
+        try {
+          const apiRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/contents/redirects.json");
+          if (apiRes.ok) {
+            const meta = await apiRes.json();
+            const content = atob(meta.content.replace(/\r?\n/g, ""));
+            redirects = JSON.parse(content);
+            fetched = true;
+          }
+        } catch (e) {
+          console.warn("GitHub API fetch error, falling back to raw CDN...", e);
+        }
+
+        // 2. Fallback to raw GitHub usercontent (cached up to 5 mins, no rate limit) if API failed
+        if (!fetched) {
+          try {
+            const rawUrl = 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/main/redirects.json?_=' + Date.now();
+            const rawRes = await fetch(rawUrl);
+            if (rawRes.ok) {
+              redirects = await rawRes.json();
+              fetched = true;
+            }
+          } catch (e) {
+            console.error("Could not fetch redirects from raw CDN", e);
+          }
+        }
+
+        if (!fetched) {
+          throw new Error("Could not load redirects database");
+        }
+
+        const targetUrl = redirects[slug.trim().toLowerCase()];
+
+        if (targetUrl) {
+          const conf = redirects._config || {};
+          const formId = conf.formId;
+          const slugEntry = conf.entrySlug;
+          const ipEntry = conf.entryIp;
+          const countryEntry = conf.entryCountry;
+          const uaEntry = conf.entryUa;
+          if (formId && ipEntry && slugEntry && countryEntry && uaEntry) {
+            let ip = "Unknown";
+            let country = "Unknown";
+            
+            // Safe fetch: Geolocation fetch with multi-fallback (ipwho.is -> freeipapi.com)
+            try {
+              const geo = await fetch('https://ipwho.is/');
+              if (geo.ok) {
+                const gd = await geo.json();
+                if (gd.success) {
+                  ip = gd.ip || "Unknown";
+                  country = gd.country || "Unknown";
+                }
+              } else {
+                throw new Error();
+              }
+            } catch(e) {
+              try {
+                const geo = await fetch('https://freeipapi.com/api/json');
+                if (geo.ok) {
+                  const gd = await geo.json();
+                  ip = gd.ipAddress || "Unknown";
+                  country = gd.countryName || "Unknown";
+                }
+              } catch(e2) {}
+            }
+
+            try {
+              const payload = new URLSearchParams();
+              payload.append('entry.' + slugEntry,    slug);
+              payload.append('entry.' + ipEntry,      ip);
+              payload.append('entry.' + countryEntry, country);
+              payload.append('entry.' + uaEntry,      navigator.userAgent);
+              
+              const formUrl = 'https://docs.google.com/forms/d/e/' + formId + '/formResponse';
+              navigator.sendBeacon(formUrl, payload);
+            } catch(e) {}
+          }
+
+          window.location.replace(targetUrl);
+        } else {
+          document.querySelector('.loader').style.display = 'none';
+          document.querySelector('p').textContent = '';
+          document.body.innerHTML += '<h2 style="font-family:sans-serif">Link not found: /' + slug + '</h2>';
+        }
+      } catch (err) {
+        document.querySelector('.loader').style.display = 'none';
+        document.querySelector('p').textContent = '';
+        document.body.innerHTML += '<h2 style="font-family:sans-serif;color:#ef4444">Error: ' + err.message + '</h2>';
+      }
+    }
+    redirect();
+  </script>
+</body>
+</html>
